@@ -41,54 +41,67 @@ async function scrapeOilPrices() {
   const response = await axios.get(SCRAPE_URL, { headers: HEADERS, timeout: 15000 });
   const $ = cheerio.load(response.data);
   const suppliers = [];
+  const seen = new Set();
 
-  const supplierLinks = [];
   $('a[href*="/distributors/"]').each((i, el) => {
-    const name = $(el).text().trim();
-    const href = $(el).attr('href');
-    if (name && href && name.length > 2) {
-      supplierLinks.push({ name, href });
-    }
-  });
+    try {
+      const nameEl = $(el);
+      const name = nameEl.text().trim();
+      if (!name || name.length < 2) return;
+      if (seen.has(name)) return;
 
-  console.log(`Found ${supplierLinks.length} supplier links`);
+      // Walk up to find the container block
+      const container = nameEl.parent();
+      if (!container.length) return;
 
-  const bodyText = $('body').text();
-  const lines = bodyText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-
-  const supplierNameSet = new Set(supplierLinks.map(s => s.name));
-  const supplierHrefMap = {};
-  supplierLinks.forEach(s => { supplierHrefMap[s.name] = s.href; });
-
-  let i = 0;
-  while (i < lines.length) {
-    const line = lines[i];
-
-    if (supplierNameSet.has(line)) {
-      const name = line;
-      const href = supplierHrefMap[name];
-      let updatedText = '';
+      // Get all text from the page around this link
+      // Find the parent that contains postcode and price info
+      let block = nameEl;
       let areas = '';
+      let updatedText = '';
       const prices = [];
-      let j = i + 1;
 
-      while (j < lines.length && j < i + 25) {
-        const l = lines[j];
-        if (l.toLowerCase().startsWith('updated')) {
-          updatedText = l;
-        } else if (/^BT\d/.test(l) && l.length < 400 && !areas) {
-          areas = l;
-        } else if (/^£[\d,]+(\.\d+)?$/.test(l)) {
-          const p = parsePrice(l);
-          if (p) prices.push(p);
+      // Walk up the DOM tree looking for a block with prices
+      for (let level = 0; level < 8; level++) {
+        block = block.parent();
+        const blockText = block.text();
+
+        // Check if this block has prices
+        const priceMatches = blockText.match(/£[\d,]+(\.\d+)?/g);
+        if (priceMatches && priceMatches.length >= 2) {
+          // Found a block with prices - extract them
+          const lines = blockText.split('\n').map(l => l.trim()).filter(l => l);
+
+          for (const line of lines) {
+            if (line.toLowerCase().startsWith('updated') && !updatedText) {
+              updatedText = line;
+            }
+            if (/^BT\d/.test(line) && line.length < 400 && !areas) {
+              areas = line;
+            }
+            if (/^£[\d,]+(\.\d+)?$/.test(line)) {
+              const p = parsePrice(line);
+              if (p && !prices.includes(p)) prices.push(p);
+            }
+          }
+
+          // Also try regex directly on block text
+          if (prices.length < 2) {
+            const matches = blockText.match(/£([\d,]+(?:\.\d+)?)/g) || [];
+            matches.forEach(m => {
+              const p = parsePrice(m);
+              if (p && p > 100 && p < 2000 && !prices.includes(p)) prices.push(p);
+            });
+          }
+
+          if (prices.length >= 2) break;
         }
-        if (j > i + 1 && supplierNameSet.has(l)) break;
-        j++;
       }
 
       if (prices.length >= 2) {
-        const p300 = prices[0] || null;
-        const p500 = prices[1] || null;
+        seen.add(name);
+        const p300 = prices[0];
+        const p500 = prices[1];
         const p900 = prices[2] || null;
         suppliers.push({
           name,
@@ -99,15 +112,14 @@ async function scrapeOilPrices() {
           ppl900: p900 ? +((p900 / 900) * 100).toFixed(2) : null,
           updatedMins: parseUpdatedMins(updatedText),
           updatedText: updatedText.replace(/^updated\s*/i, '').trim(),
-          updatedAt: updatedText ? new Date(Date.now() - parseUpdatedMins(updatedText) * 60000).toISOString() : null,
-          sourceUrl: `https://www.cheapestoil.co.uk${href}`,
+          updatedAt: new Date(Date.now() - parseUpdatedMins(updatedText) * 60000).toISOString(),
+          sourceUrl: `https://www.cheapestoil.co.uk${nameEl.attr('href')}`,
         });
       }
-      i = j;
-      continue;
+    } catch (e) {
+      console.error('Error parsing supplier:', e.message);
     }
-    i++;
-  }
+  });
 
   console.log(`[${new Date().toISOString()}] Scraped ${suppliers.length} suppliers.`);
   return { suppliers, fetchedAt: new Date().toISOString(), source: SCRAPE_URL, count: suppliers.length };
