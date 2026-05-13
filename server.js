@@ -19,21 +19,21 @@ const HEADERS = {
   'Accept-Language': 'en-GB,en;q=0.9',
 };
 
-function parseUpdatedAt(text) {
-  if (!text) return null;
-  const t = text.toLowerCase().trim();
-  const minsMatch = t.match(/(\d+)\s+min/);
-  if (minsMatch) { const d = new Date(); d.setMinutes(d.getMinutes() - parseInt(minsMatch[1])); return d.toISOString(); }
-  const hrsMatch = t.match(/(\d+)\s+hour/);
-  if (hrsMatch) { const d = new Date(); d.setHours(d.getHours() - parseInt(hrsMatch[1])); return d.toISOString(); }
-  if (t.includes('yesterday')) { const d = new Date(); d.setDate(d.getDate() - 1); return d.toISOString(); }
-  return null;
-}
-
 function parsePrice(str) {
   if (!str) return null;
-  const val = parseFloat(str.replace(/[£,\s]/g, ''));
+  const val = parseFloat(str.replace(/[£,\s]/g, '').trim());
   return isNaN(val) ? null : val;
+}
+
+function parseUpdatedMins(text) {
+  if (!text) return 9999;
+  const t = text.toLowerCase();
+  const mins = t.match(/(\d+)\s+min/);
+  if (mins) return parseInt(mins[1]);
+  const hrs = t.match(/(\d+)\s+hour/);
+  if (hrs) return parseInt(hrs[1]) * 60;
+  if (t.includes('yesterday')) return 1440;
+  return 2880;
 }
 
 async function scrapeOilPrices() {
@@ -42,37 +42,54 @@ async function scrapeOilPrices() {
   const $ = cheerio.load(response.data);
   const suppliers = [];
 
+  const supplierLinks = [];
   $('a[href*="/distributors/"]').each((i, el) => {
-    try {
-      const nameEl = $(el);
-      const name = nameEl.text().trim();
-      if (!name) return;
+    const name = $(el).text().trim();
+    const href = $(el).attr('href');
+    if (name && href && name.length > 2) {
+      supplierLinks.push({ name, href });
+    }
+  });
 
-      const container = nameEl.closest('tr, div');
-      if (!container.length) return;
+  console.log(`Found ${supplierLinks.length} supplier links`);
 
-      const priceTexts = [];
-      container.find('td, .price').each((_, cell) => {
-        const text = $(cell).text().trim();
-        if (/^£[\d,]+(\.\d+)?$/.test(text)) priceTexts.push(text);
-      });
+  const bodyText = $('body').text();
+  const lines = bodyText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
 
-      let areas = '';
-      container.find('td, span, p').each((_, cell) => {
-        const text = $(cell).text().trim();
-        if (/BT\d/.test(text) && text.length < 300) areas = text;
-      });
+  const supplierNameSet = new Set(supplierLinks.map(s => s.name));
+  const supplierHrefMap = {};
+  supplierLinks.forEach(s => { supplierHrefMap[s.name] = s.href; });
 
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (supplierNameSet.has(line)) {
+      const name = line;
+      const href = supplierHrefMap[name];
       let updatedText = '';
-      container.find('*').each((_, cell) => {
-        const text = $(cell).text().trim();
-        if (text.toLowerCase().includes('updated')) updatedText = text;
-      });
+      let areas = '';
+      const prices = [];
+      let j = i + 1;
 
-      if (priceTexts.length >= 2) {
-        const p300 = parsePrice(priceTexts[0]);
-        const p500 = parsePrice(priceTexts[1]);
-        const p900 = parsePrice(priceTexts[2]) || null;
+      while (j < lines.length && j < i + 25) {
+        const l = lines[j];
+        if (l.toLowerCase().startsWith('updated')) {
+          updatedText = l;
+        } else if (/^BT\d/.test(l) && l.length < 400 && !areas) {
+          areas = l;
+        } else if (/^£[\d,]+(\.\d+)?$/.test(l)) {
+          const p = parsePrice(l);
+          if (p) prices.push(p);
+        }
+        if (j > i + 1 && supplierNameSet.has(l)) break;
+        j++;
+      }
+
+      if (prices.length >= 2) {
+        const p300 = prices[0] || null;
+        const p500 = prices[1] || null;
+        const p900 = prices[2] || null;
         suppliers.push({
           name,
           areas: areas.replace(/\s+/g, ' ').trim(),
@@ -80,15 +97,19 @@ async function scrapeOilPrices() {
           ppl300: p300 ? +((p300 / 300) * 100).toFixed(2) : null,
           ppl500: p500 ? +((p500 / 500) * 100).toFixed(2) : null,
           ppl900: p900 ? +((p900 / 900) * 100).toFixed(2) : null,
-          updatedAt: parseUpdatedAt(updatedText),
+          updatedMins: parseUpdatedMins(updatedText),
           updatedText: updatedText.replace(/^updated\s*/i, '').trim(),
-          sourceUrl: `https://www.cheapestoil.co.uk${nameEl.attr('href')}`,
+          updatedAt: updatedText ? new Date(Date.now() - parseUpdatedMins(updatedText) * 60000).toISOString() : null,
+          sourceUrl: `https://www.cheapestoil.co.uk${href}`,
         });
       }
-    } catch (e) {}
-  });
+      i = j;
+      continue;
+    }
+    i++;
+  }
 
-  console.log(`Scraped ${suppliers.length} suppliers.`);
+  console.log(`[${new Date().toISOString()}] Scraped ${suppliers.length} suppliers.`);
   return { suppliers, fetchedAt: new Date().toISOString(), source: SCRAPE_URL, count: suppliers.length };
 }
 
@@ -96,6 +117,7 @@ async function refreshCache() {
   try {
     const data = await scrapeOilPrices();
     cache.set('prices', data);
+    console.log(`Cache updated: ${data.count} suppliers`);
   } catch (err) {
     console.error('Scrape failed:', err.message);
   }
@@ -108,19 +130,15 @@ app.get('/api/prices', async (req, res) => {
   try {
     let data = cache.get('prices');
     if (!data) { data = await scrapeOilPrices(); cache.set('prices', data); }
-
     let { suppliers } = data;
     const { postcode, sort, sortDir } = req.query;
-
     if (postcode) {
       const pc = postcode.toUpperCase().trim();
       suppliers = suppliers.filter(s => s.areas.toUpperCase().includes(pc));
     }
-
     const vol = ['300', '500', '900'].includes(sort) ? sort : '500';
     const dir = sortDir === 'desc' ? -1 : 1;
     suppliers = [...suppliers].sort((a, b) => ((a[`p${vol}`] || 99999) - (b[`p${vol}`] || 99999)) * dir);
-
     res.json({ ...data, suppliers, filteredCount: suppliers.length });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch prices', detail: err.message });
