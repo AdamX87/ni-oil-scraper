@@ -95,7 +95,7 @@ const WEBSITE_OVERRIDES = {
   'tweed fuels': 'https://tweeds.co.uk',
   'urgent oil': 'https://www.urgentoil.com',
   'vale fuels': 'https://valefuels.com',
-  'wise oil': 'https://www.wiseoil.com',
+  'wise oil': 'https://www.wiseoil.co.uk',
 };
 
 const HEADERS = {
