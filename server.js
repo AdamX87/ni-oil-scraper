@@ -36,7 +36,7 @@ const WEBSITE_OVERRIDES = {
   'cheaper oil - belfast': 'https://www.cheaperoil.com',
   'cheaper oil - derry': 'https://www.cheaperoil.com',
   'cheaper oil - down': 'https://www.cheaperoil.com',
-  'click oil': 'https://www.clickoil.co.uk',
+  'click oil': 'https://www.clickoil.com',
   'cross county fuels': 'https://www.crosscountyfuels.net',
   'discount oil': 'https://www.discountoil.co.uk',
   'doherty firewood and fuels': 'https://www.dohertygroup.ie',
