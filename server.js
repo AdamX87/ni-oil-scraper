@@ -56,10 +56,22 @@ async function scrapeSupplierDetails(url) {
       if (tel && !phones.includes(tel)) phones.push(tel);
     });
 
+    // Blocked domains — skip these and only return the supplier's own website
+    const blockedDomains = [
+      'cheapestoil.co.uk', 'facebook.com', 'twitter.com', 'instagram.com',
+      'youtube.com', 'linkedin.com', 'google.com', 'googleapis.com',
+      'gstatic.com', 'cloudflare.com', 'jquery.com', 'bootstrapcdn.com',
+      'niheatingoil.co.uk', 'amazon.co.uk', 'amazon.com',
+    ];
+
     let website = '';
     $('a[href^="http"]').each((_, el) => {
       const href = $(el).attr('href');
-      if (href && !href.includes('cheapestoil') && !href.includes('facebook') && !href.includes('twitter') && !website) {
+      if (!href || website) return;
+      const isBlocked = blockedDomains.some(d => href.includes(d));
+      // Must look like a real business website (has a dot in domain, not just a path)
+      const looksReal = /^https?:\/\/[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/.test(href);
+      if (!isBlocked && looksReal) {
         website = href;
       }
     });
