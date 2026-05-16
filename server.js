@@ -12,6 +12,7 @@ app.use(cors({ origin: '*' }));
 app.use(express.json());
 
 const SCRAPE_URL = 'https://www.cheapestoil.co.uk/Heating-Oil-NI?sort=1&remember=&prices=';
+const BASE_URL = 'https://www.cheapestoil.co.uk';
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
@@ -36,8 +37,45 @@ function parseUpdatedMins(text) {
   return 2880;
 }
 
+async function scrapeSupplierDetails(url) {
+  try {
+    const response = await axios.get(url, { headers: HEADERS, timeout: 10000 });
+    const $ = cheerio.load(response.data);
+    const text = $('body').text();
+
+    const phoneRegex = /(\+44\s?)?(\(0\))?\s?(028|07\d{3}|02\d{2})\s?\d{3,4}\s?\d{3,4}/g;
+    const phones = [];
+    let match;
+    while ((match = phoneRegex.exec(text)) !== null) {
+      const phone = match[0].trim().replace(/\s+/g, ' ');
+      if (!phones.includes(phone)) phones.push(phone);
+    }
+
+    $('a[href^="tel:"]').each((_, el) => {
+      const tel = $(el).attr('href').replace('tel:', '').trim();
+      if (tel && !phones.includes(tel)) phones.push(tel);
+    });
+
+    let website = '';
+    $('a[href^="http"]').each((_, el) => {
+      const href = $(el).attr('href');
+      if (href && !href.includes('cheapestoil') && !href.includes('facebook') && !href.includes('twitter') && !website) {
+        website = href;
+      }
+    });
+
+    let email = '';
+    const emailMatch = text.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+    if (emailMatch) email = emailMatch[0];
+
+    return { phone: phones[0] || null, allPhones: phones, website: website || null, email: email || null };
+  } catch (err) {
+    return { phone: null, allPhones: [], website: null, email: null };
+  }
+}
+
 async function scrapeOilPrices() {
-  console.log(`[${new Date().toISOString()}] Scraping...`);
+  console.log(`[${new Date().toISOString()}] Scraping main list...`);
   const response = await axios.get(SCRAPE_URL, { headers: HEADERS, timeout: 15000 });
   const $ = cheerio.load(response.data);
   const suppliers = [];
@@ -50,42 +88,25 @@ async function scrapeOilPrices() {
       if (!name || name.length < 2) return;
       if (seen.has(name)) return;
 
-      // Walk up to find the container block
-      const container = nameEl.parent();
-      if (!container.length) return;
-
-      // Get all text from the page around this link
-      // Find the parent that contains postcode and price info
       let block = nameEl;
       let areas = '';
       let updatedText = '';
       const prices = [];
 
-      // Walk up the DOM tree looking for a block with prices
       for (let level = 0; level < 8; level++) {
         block = block.parent();
         const blockText = block.text();
-
-        // Check if this block has prices
         const priceMatches = blockText.match(/£[\d,]+(\.\d+)?/g);
         if (priceMatches && priceMatches.length >= 2) {
-          // Found a block with prices - extract them
           const lines = blockText.split('\n').map(l => l.trim()).filter(l => l);
-
           for (const line of lines) {
-            if (line.toLowerCase().startsWith('updated') && !updatedText) {
-              updatedText = line;
-            }
-            if (/^BT\d/.test(line) && line.length < 400 && !areas) {
-              areas = line;
-            }
+            if (line.toLowerCase().startsWith('updated') && !updatedText) updatedText = line;
+            if (/^BT\d/.test(line) && line.length < 400 && !areas) areas = line;
             if (/^£[\d,]+(\.\d+)?$/.test(line)) {
               const p = parsePrice(line);
               if (p && !prices.includes(p)) prices.push(p);
             }
           }
-
-          // Also try regex directly on block text
           if (prices.length < 2) {
             const matches = blockText.match(/£([\d,]+(?:\.\d+)?)/g) || [];
             matches.forEach(m => {
@@ -93,7 +114,6 @@ async function scrapeOilPrices() {
               if (p && p > 100 && p < 2000 && !prices.includes(p)) prices.push(p);
             });
           }
-
           if (prices.length >= 2) break;
         }
       }
@@ -103,6 +123,7 @@ async function scrapeOilPrices() {
         const p300 = prices[0];
         const p500 = prices[1];
         const p900 = prices[2] || null;
+        const href = nameEl.attr('href');
         suppliers.push({
           name,
           areas: areas.replace(/\s+/g, ' ').trim(),
@@ -113,15 +134,32 @@ async function scrapeOilPrices() {
           updatedMins: parseUpdatedMins(updatedText),
           updatedText: updatedText.replace(/^updated\s*/i, '').trim(),
           updatedAt: new Date(Date.now() - parseUpdatedMins(updatedText) * 60000).toISOString(),
-          sourceUrl: `https://www.cheapestoil.co.uk${nameEl.attr('href')}`,
+          sourceUrl: `${BASE_URL}${href}`,
+          slug: href ? href.replace('/distributors/', '').replace(/\//g, '').toLowerCase() : name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
+          phone: null, website: null, email: null,
         });
       }
-    } catch (e) {
-      console.error('Error parsing supplier:', e.message);
-    }
+    } catch (e) {}
   });
 
-  console.log(`[${new Date().toISOString()}] Scraped ${suppliers.length} suppliers.`);
+  console.log(`Found ${suppliers.length} suppliers. Scraping phone numbers...`);
+
+  const batchSize = 5;
+  for (let i = 0; i < suppliers.length; i += batchSize) {
+    const batch = suppliers.slice(i, i + batchSize);
+    await Promise.all(batch.map(async (supplier) => {
+      if (supplier.sourceUrl && supplier.sourceUrl.includes('/distributors/')) {
+        const details = await scrapeSupplierDetails(supplier.sourceUrl);
+        supplier.phone = details.phone;
+        supplier.allPhones = details.allPhones;
+        supplier.website = details.website;
+        supplier.email = details.email;
+      }
+    }));
+    await new Promise(r => setTimeout(r, 500));
+  }
+
+  console.log(`Done. ${suppliers.filter(s => s.phone).length}/${suppliers.length} suppliers have phone numbers.`);
   return { suppliers, fetchedAt: new Date().toISOString(), source: SCRAPE_URL, count: suppliers.length };
 }
 
@@ -129,7 +167,6 @@ async function refreshCache() {
   try {
     const data = await scrapeOilPrices();
     cache.set('prices', data);
-    console.log(`Cache updated: ${data.count} suppliers`);
   } catch (err) {
     console.error('Scrape failed:', err.message);
   }
@@ -157,19 +194,13 @@ app.get('/api/prices', async (req, res) => {
   }
 });
 
-app.get('/api/prices/cheapest', async (req, res) => {
+app.get('/api/supplier/:slug', async (req, res) => {
   try {
     let data = cache.get('prices');
     if (!data) { data = await scrapeOilPrices(); cache.set('prices', data); }
-    const limit = parseInt(req.query.limit) || 5;
-    res.json({
-      fetchedAt: data.fetchedAt,
-      cheapest: {
-        '300L': [...data.suppliers].filter(s => s.p300).sort((a,b) => a.p300 - b.p300).slice(0, limit),
-        '500L': [...data.suppliers].filter(s => s.p500).sort((a,b) => a.p500 - b.p500).slice(0, limit),
-        '900L': [...data.suppliers].filter(s => s.p900).sort((a,b) => a.p900 - b.p900).slice(0, limit),
-      }
-    });
+    const supplier = data.suppliers.find(s => s.slug === req.params.slug);
+    if (!supplier) return res.status(404).json({ error: 'Supplier not found' });
+    res.json(supplier);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
