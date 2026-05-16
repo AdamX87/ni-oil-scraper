@@ -14,6 +14,90 @@ app.use(express.json());
 const SCRAPE_URL = 'https://www.cheapestoil.co.uk/Heating-Oil-NI?sort=1&remember=&prices=';
 const BASE_URL = 'https://www.cheapestoil.co.uk';
 
+// Manual website overrides
+const WEBSITE_OVERRIDES = {
+  'ah fuel oils': 'https://www.ahfueloils.com',
+  'alfa oils belfast': 'https://www.alfaoils.co.uk',
+  'alfa oils carrickfergus': 'https://www.alfaoils.co.uk',
+  'alfa oils craigavon': 'https://www.alfaoils.co.uk',
+  'ballynahinch fuel': 'https://www.ballynahinchfuel.com',
+  'banbridge fuels': 'https://www.banbridgefuels.com',
+  'bangor fuels': 'https://www.bangorfuels.com',
+  'beckett fuels': 'https://www.beckettoils.co.uk',
+  'belfast and down oil': 'https://www.belfastdownoil.co.uk',
+  'blackhill energy': 'https://www.blackhillenergy.net',
+  'campsie fuels': 'https://www.campsiefuels.com',
+  'capper trading': 'https://www.cappertrading.com',
+  'carlisle fuels': 'https://www.carlislefuels.co.uk',
+  'casey oils': 'https://www.caseyoils.com',
+  'castlereagh fuels': 'http://www.castlereaghfuels.com',
+  'cb fuels': 'https://www.cbfuels.co.uk',
+  'cbs fuels': 'https://www.cbsfuels.co.uk',
+  'cheaper oil - belfast': 'https://www.cheaperoil.com',
+  'cheaper oil - derry': 'https://www.cheaperoil.com',
+  'cheaper oil - down': 'https://www.cheaperoil.com',
+  'click oil': 'https://www.clickoil.co.uk',
+  'cross county fuels': 'https://www.crosscountyfuels.net',
+  'discount oil': 'https://www.discountoil.co.uk',
+  'doherty firewood and fuels': 'https://www.dohertygroup.ie',
+  'donnelly fuels': 'https://www.donnellyfuels.co.uk',
+  'finney brothers': 'https://www.finneybrothers.co.uk',
+  'first choice fuels-craigavon': 'https://www.firstchoicefuels.com',
+  'first choice fuels-dungannon': 'https://www.firstchoicefuels.com',
+  'freemans fuels': 'https://www.freemansfuels.co.uk',
+  'fuel direct': 'https://www.fueldirect.co.uk',
+  'fuels and lubricants': 'https://www.fandl.co.uk',
+  'heat direct belfast': 'https://www.heatdirectni.com',
+  'heat direct craigavon': 'https://www.heatdirectni.com',
+  'heat direct lisburn': 'https://www.heatdirectni.com',
+  'heat direct banbridge': 'https://www.heatdirectni.com',
+  'jennings fuels': 'https://www.jenningsfuels.com',
+  'kelly oils': 'https://www.kellyfuels.com',
+  'kerr fuels': 'https://www.kerrfuels.com',
+  'lagan oils': 'https://www.laganoils.com',
+  'lagan oils carrick': 'https://www.laganoils.com',
+  'lagan oils glenavy': 'https://www.laganoils.com',
+  'lcc oil online ballymena': 'https://www.lcc-group.co.uk',
+  'lcc oil online cookstown': 'https://www.lcc-group.co.uk',
+  'lisburn city oil': 'https://www.lisburncityoil.co.uk',
+  'lisburn fuels': 'https://www.lisburnfuels.com',
+  'lisburn fuels belfast': 'https://www.lisburnfuels.com',
+  'lisburn fuels mid ulster': 'https://www.lisburnfuels.com',
+  'mcginleys gas and oil': 'https://mcginleysoil.com',
+  'mchugh fuels': 'https://www.mchughfuels.com',
+  'mk domestics': 'https://www.mkdomestics.com',
+  'morgan fuels newry': 'https://www.morganfuels.com',
+  'new city fuels': 'https://newcityfuels.co.uk',
+  'nicholl oil online ballymena': 'https://nicholl247.com',
+  'nicholl oil online dungannon': 'https://nicholl247.com',
+  'nicholl oil online omagh': 'https://nicholl247.com',
+  'pj fuels': 'https://www.pjfuels.com',
+  'portadown oil supplies': 'https://www.portadownoil.com',
+  'port fuels': 'https://portfuelsni.com',
+  'premier fuels': 'https://www.premierfuels.net',
+  'r w sloane fuels': 'https://rwsloanefuels.com',
+  'riverside oils': 'https://riversideoils.co.uk',
+  'robinson fuels': 'https://www.robinsonfuels.co.uk',
+  'save oils': 'https://saveoils.com',
+  'scotts fuels': 'https://www.scottsfuels.com',
+  'scotts fuels lderry': 'https://www.scottsfuels.com',
+  'scotts fuels northwest': 'https://www.scottsfuels.com',
+  'six mile fuels': 'https://www.sixmilefuelsltd.com',
+  'solo direct': 'https://www.solodirect.com',
+  'springtown fuels': 'https://www.springtownfuels.com',
+  'stanley gordon fuels': 'https://stanleygordonfuels.co.uk',
+  'star fuels': 'https://starfuels.co.uk',
+  'theoilco': 'https://theoilco.net',
+  'theoilco craigavon': 'https://theoilco.net',
+  'theoilco lisburn': 'https://theoilco.net',
+  'theoilco newtownabbey': 'https://theoilco.net',
+  'top oil newry': 'https://www.topoil.co.uk',
+  'tweed fuels': 'https://tweeds.co.uk',
+  'urgent oil': 'https://www.urgentoil.com',
+  'vale fuels': 'https://valefuels.com',
+  'wise oil': 'https://www.wiseoil.com',
+};
+
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
@@ -148,7 +232,9 @@ async function scrapeOilPrices() {
           updatedAt: new Date(Date.now() - parseUpdatedMins(updatedText) * 60000).toISOString(),
           sourceUrl: `${BASE_URL}${href}`,
           slug: href ? href.replace('/distributors/', '').replace(/\//g, '').toLowerCase() : name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
-          phone: null, website: null, email: null,
+          phone: null,
+          website: WEBSITE_OVERRIDES[name.toLowerCase()] || null,
+          email: null,
         });
       }
     } catch (e) {}
@@ -164,7 +250,8 @@ async function scrapeOilPrices() {
         const details = await scrapeSupplierDetails(supplier.sourceUrl);
         supplier.phone = details.phone;
         supplier.allPhones = details.allPhones;
-        supplier.website = details.website;
+        // Only use scraped website if no manual override exists
+          if (!supplier.website) supplier.website = details.website;
         supplier.email = details.email;
       }
     }));
