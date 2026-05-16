@@ -233,7 +233,7 @@ async function scrapeOilPrices() {
           sourceUrl: `${BASE_URL}${href}`,
           slug: href ? href.replace('/distributors/', '').replace(/\//g, '').toLowerCase() : name.toLowerCase().replace(/[^a-z0-9]/g, '-'),
           phone: null,
-          website: WEBSITE_OVERRIDES[name.toLowerCase()] || null,
+          website: WEBSITE_OVERRIDES[name.toLowerCase().trim().replace(/[^a-z0-9 ]/g, '').replace(/s+/g, ' ')] || WEBSITE_OVERRIDES[name.toLowerCase().trim()] || null,
           email: null,
         });
       }
