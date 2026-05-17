@@ -269,6 +269,20 @@ async function refreshCache() {
   try {
     const data = await scrapeOilPrices();
     cache.set('prices', data);
+
+    // Store price history (keep last 90 data points)
+    const history = cache.get('priceHistory') || [];
+    const s500 = data.suppliers.filter(s => s.p500);
+    const s300 = data.suppliers.filter(s => s.p300);
+    const s900 = data.suppliers.filter(s => s.p900);
+    const avgP500 = s500.reduce((a,r) => a+r.p500, 0) / (s500.length||1);
+    const avgP300 = s300.reduce((a,r) => a+r.p300, 0) / (s300.length||1);
+    const avgP900 = s900.reduce((a,r) => a+r.p900, 0) / (s900.length||1);
+    const minP500 = s500.length ? Math.min(...s500.map(s => s.p500)) : 0;
+    history.push({ t: Date.now(), avgP300: +avgP300.toFixed(2), avgP500: +avgP500.toFixed(2), avgP900: +avgP900.toFixed(2), minP500: +minP500.toFixed(2), count: data.count });
+    if (history.length > 90) history.shift();
+    cache.set('priceHistory', history, 0);
+    console.log(`Cache updated: ${data.count} suppliers. History: ${history.length} points.`);
   } catch (err) {
     console.error('Scrape failed:', err.message);
   }
@@ -276,6 +290,15 @@ async function refreshCache() {
 
 refreshCache();
 setInterval(refreshCache, 30 * 60 * 1000);
+
+app.get('/api/history', async (req, res) => {
+  try {
+    const history = cache.get('priceHistory') || [];
+    res.json({ history, points: history.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 app.get('/api/prices', async (req, res) => {
   try {
