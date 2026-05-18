@@ -5,7 +5,7 @@ const cors = require('cors');
 const NodeCache = require('node-cache');
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3000;
 const cache = new NodeCache({ stdTTL: 1800 });
 
 app.use(cors({ origin: '*' }));
@@ -247,6 +247,31 @@ async function scrapeOilPrices() {
       }
 
       if (prices.length >= 2) {
+        // VALIDATION — reject poisoned/injected data
+        const nameClean = name.toLowerCase().trim();
+
+        // Reject if supplier name contains suspicious injected text
+        const bannedPhrases = [
+          'cheapestoil', 'cheapest oil', 'stolen content', 'scraped without',
+          'permission', 'warning', '⚠️', 'blocked', 'banned'
+        ];
+        if (bannedPhrases.some(p => nameClean.includes(p))) {
+          console.log(`Rejected poisoned supplier: ${name}`);
+          return;
+        }
+
+        // Reject if name is too short or too long
+        if (name.length < 3 || name.length > 80) return;
+
+        // Reject if prices are outside realistic range (£100–£2000)
+        if (prices.some(p => p < 100 || p > 2000)) {
+          console.log(`Rejected out-of-range prices for: ${name}`);
+          return;
+        }
+
+        // Reject if we got very few suppliers total (poisoning detection)
+        // This is checked after all suppliers are collected below
+
         seen.add(name);
         const p300 = prices[0];
         const p500 = prices[1];
@@ -272,7 +297,14 @@ async function scrapeOilPrices() {
     } catch (e) {}
   });
 
-  console.log(`Found ${suppliers.length} suppliers. Scraping phone numbers...`);
+  console.log(`[${new Date().toISOString()}] Found ${suppliers.length} suppliers. Scraping phone numbers...`);
+
+  // POISONING DETECTION — if we got fewer than 20 suppliers, something is wrong
+  // Keep the last good cache instead of overwriting with bad data
+  if (suppliers.length < 20) {
+    console.log(`⚠️ Only ${suppliers.length} suppliers found — possible poisoning detected. Keeping last good cache.`);
+    return null;
+  }
 
   const batchSize = 5;
   for (let i = 0; i < suppliers.length; i += batchSize) {
@@ -297,6 +329,13 @@ async function scrapeOilPrices() {
 async function refreshCache() {
   try {
     const data = await scrapeOilPrices();
+
+    // If null returned, poisoning was detected — keep existing cache
+    if (!data) {
+      console.log('Keeping existing cache due to poisoning detection.');
+      return;
+    }
+
     cache.set('prices', data);
 
     // Store price history (keep last 90 data points)
