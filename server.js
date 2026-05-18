@@ -103,9 +103,38 @@ const WEBSITE_OVERRIDES = {
 
 const HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-  'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
   'Accept-Language': 'en-GB,en;q=0.9',
+  'Accept-Encoding': 'gzip, deflate, br',
+  'Cache-Control': 'no-cache',
+  'Pragma': 'no-cache',
+  'Sec-Ch-Ua': '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+  'Sec-Ch-Ua-Mobile': '?0',
+  'Sec-Ch-Ua-Platform': '"Windows"',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'none',
+  'Sec-Fetch-User': '?1',
+  'Upgrade-Insecure-Requests': '1',
+  'Referer': 'https://www.google.com/',
 };
+
+async function fetchWithRetry(url, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await axios.get(url, {
+        headers: HEADERS,
+        timeout: 20000,
+        maxRedirects: 5,
+      });
+      return response;
+    } catch (err) {
+      console.log(`Attempt ${i+1} failed for ${url}: ${err.message}`);
+      if (i < retries - 1) await new Promise(r => setTimeout(r, 2000 * (i + 1)));
+    }
+  }
+  throw new Error(`Failed after ${retries} attempts`);
+}
 
 function parsePrice(str) {
   if (!str) return null;
@@ -126,7 +155,7 @@ function parseUpdatedMins(text) {
 
 async function scrapeSupplierDetails(url) {
   try {
-    const response = await axios.get(url, { headers: HEADERS, timeout: 10000 });
+    const response = await fetchWithRetry(url);
     const $ = cheerio.load(response.data);
     const text = $('body').text();
 
@@ -175,7 +204,7 @@ async function scrapeSupplierDetails(url) {
 
 async function scrapeOilPrices() {
   console.log(`[${new Date().toISOString()}] Scraping main list...`);
-  const response = await axios.get(SCRAPE_URL, { headers: HEADERS, timeout: 15000 });
+  const response = await fetchWithRetry(SCRAPE_URL);
   const $ = cheerio.load(response.data);
   const suppliers = [];
   const seen = new Set();
