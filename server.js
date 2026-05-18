@@ -5,7 +5,7 @@ const cors = require('cors');
 const NodeCache = require('node-cache');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 const cache = new NodeCache({ stdTTL: 1800 });
 
 app.use(cors({ origin: '*' }));
