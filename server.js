@@ -3,10 +3,57 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 const cors = require('cors');
 const NodeCache = require('node-cache');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 8080;
 const cache = new NodeCache({ stdTTL: 1800 });
+
+// File paths for persistent cache
+const CACHE_FILE = path.join('/tmp', 'prices_cache.json');
+const HISTORY_FILE = path.join('/tmp', 'price_history.json');
+
+// Save cache to disk
+function saveCacheToDisk(data) {
+  try {
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(data));
+    console.log('Cache saved to disk.');
+  } catch (err) {
+    console.error('Failed to save cache to disk:', err.message);
+  }
+}
+
+// Load cache from disk on startup
+function loadCacheFromDisk() {
+  try {
+    if (fs.existsSync(CACHE_FILE)) {
+      const data = JSON.parse(fs.readFileSync(CACHE_FILE, 'utf8'));
+      if (data && data.suppliers && data.suppliers.length > 20) {
+        cache.set('prices', data);
+        console.log(`Loaded ${data.suppliers.length} suppliers from disk cache.`);
+      }
+    }
+    if (fs.existsSync(HISTORY_FILE)) {
+      const history = JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
+      if (Array.isArray(history)) {
+        cache.set('priceHistory', history, 0);
+        console.log(`Loaded ${history.length} history points from disk.`);
+      }
+    }
+  } catch (err) {
+    console.error('Failed to load cache from disk:', err.message);
+  }
+}
+
+// Save history to disk
+function saveHistoryToDisk(history) {
+  try {
+    fs.writeFileSync(HISTORY_FILE, JSON.stringify(history));
+  } catch (err) {
+    console.error('Failed to save history to disk:', err.message);
+  }
+}
 
 app.use(cors({ origin: '*' }));
 app.use(express.json());
@@ -338,7 +385,10 @@ async function refreshCache() {
 
     cache.set('prices', data);
 
-    // Store price history (keep last 90 data points)
+    // Save to disk so it survives server restarts
+    saveCacheToDisk(data);
+
+    // Store price history
     const history = cache.get('priceHistory') || [];
     const s500 = data.suppliers.filter(s => s.p500);
     const s300 = data.suppliers.filter(s => s.p300);
@@ -350,11 +400,18 @@ async function refreshCache() {
     history.push({ t: Date.now(), avgP300: +avgP300.toFixed(2), avgP500: +avgP500.toFixed(2), avgP900: +avgP900.toFixed(2), minP500: +minP500.toFixed(2), count: data.count });
     if (history.length > 90) history.shift();
     cache.set('priceHistory', history, 0);
+
+    // Save history to disk too
+    saveHistoryToDisk(history);
+
     console.log(`Cache updated: ${data.count} suppliers. History: ${history.length} points.`);
   } catch (err) {
     console.error('Scrape failed:', err.message);
   }
 }
+
+// Load cache from disk on startup — prices available instantly after restart
+loadCacheFromDisk();
 
 refreshCache();
 setInterval(refreshCache, 30 * 60 * 1000);
