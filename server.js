@@ -344,7 +344,23 @@ async function scrapeOilPrices() {
     } catch (e) {}
   });
 
-  console.log(`[${new Date().toISOString()}] Found ${suppliers.length} suppliers. Scraping phone numbers...`);
+  console.log(`[${new Date().toISOString()}] Found ${suppliers.length} suppliers before deduplication.`);
+
+  // DEDUPLICATION — keep only the most recently updated entry per supplier name
+  const dedupedMap = new Map();
+  suppliers.forEach(s => {
+    const key = s.name.toLowerCase().trim();
+    const existing = dedupedMap.get(key);
+    if (!existing || s.updatedMins < existing.updatedMins) {
+      dedupedMap.set(key, s);
+    }
+  });
+  const dedupedSuppliers = Array.from(dedupedMap.values());
+  console.log(`After deduplication: ${dedupedSuppliers.length} unique suppliers.`);
+
+  // Replace suppliers with deduped list
+  suppliers.length = 0;
+  dedupedSuppliers.forEach(s => suppliers.push(s));
 
   // POISONING DETECTION — if we got fewer than 20 suppliers, something is wrong
   // Keep the last good cache instead of overwriting with bad data
